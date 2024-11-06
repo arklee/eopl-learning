@@ -84,8 +84,8 @@
    (var identifier?)
    (body expression?)
    (saved-env environment?))
-  (array-val
-   (array array?)))
+  (mutpair-val
+   (pair mutpair?)))
 
 (define denval? number?)
 
@@ -114,40 +114,37 @@
         val
         (report-expval-extractor-error 'reference val))))
 
-(define array?
+(define mutpair?
   (lambda (v)
     (reference? v)))
 
-(define newarray
-  (lambda (len initval)
-    (letrec ([f
-              (lambda (len)
-                (if (= len 0)
-                    27
-                    (begin
-                      (newref initval)
-                      (f (- len 1)))))])
-      (let ([firstloc (newref initval)])
-        (begin (f (- len 1))
-               firstloc)))))
+(define make-pair
+  (lambda (val1 val2)
+    (let ((ref1 (newref val1)))
+      (let ((ref2 (newref val2)))
+        ref1))))
 
-(define arrayref
-  (lambda (arr ref)
-    (if (array? arr)
-        (deref (+ arr ref))
-        (eopl:error "~s is not an array" 'arr))))
+(define left
+  (lambda (p)
+    (deref p)))
 
-(define arrayset
-  (lambda (arr ref val)
-    (if (array? arr)
-        (setref! (+ arr ref) val)
-        (eopl:error "~s is not an array" 'arr))))
+(define right
+  (lambda (p)
+    (deref (+ 1 p))))
 
-(define expval->array
+(define setleft
+  (lambda (p val)
+    (setref! p val)))
+
+(define setright
+  (lambda (p val)
+    (setref! (+ 1 p) val)))
+
+(define expval->pair
   (lambda (val)
     (cases expval val
-      (array-val (array) array)
-      (else (report-expval-extractor-error 'array val)))))
+      (mutpair-val (pair) pair)
+      (else (report-expval-extractor-error 'pair val)))))
 
 (define-datatype expression expression?
   (const-exp
@@ -199,20 +196,24 @@
    (proc expression?)
    (val expression?))
   (begin-exp
-    (lst (list-of expression?)))
+    (exp1 expression?)
+    (exp2 expression?))
+  (newpair-exp
+   (exp1 expression?)
+   (exp2 expression?))
+  (left-exp
+   (pair expression?))
+  (right-exp
+   (pair expression?))
+  (setleft-exp
+   (pair expression?)
+   (val expression?))
+  (setright-exp
+   (pair expression?)
+   (val expression?))
   (assign-exp
    (var identifier?)
-   (exp expression?))
-  (array-exp
-   (len integer?)
-   (val expression?))
-  (arrayref-exp
-   (arr expression?)
-   (ref expression?))
-  (arrayset-exp
-   (arr expression?)
-   (ref expression?)
-   (val expression?)))
+   (exp expression?)))
 
 (define value-of
   (lambda (exp env)
@@ -289,28 +290,28 @@
          (begin
            (setref! loc (proc-val proc-var proc-body new-env))
            (value-of body new-env))))
+      (newpair-exp
+       (exp1 exp2)
+       (mutpair-val (make-pair (value-of exp1 env) (value-of exp2 env))))
+      (left-exp (exp) (left (expval->pair (value-of exp env))))
+      (right-exp (exp) (right (expval->pair (value-of exp env))))
+      (setleft-exp
+       (exp1 exp2)
+       (setleft (expval->pair (value-of exp1 env))
+                (value-of exp2 env)))
+      (setright-exp
+       (exp1 exp2)
+       (setright (expval->pair (value-of exp1 env))
+                (value-of exp2 env)))
       (assign-exp
        (var exp)
        (begin
          (setref! (denval->ref (apply-env env var)) (value-of exp env))
          (num-val 27)))
-      (array-exp
-       (len exp)
-       (array-val (newarray (expval->num (value-of len env)) (value-of exp env))))
-      (arrayref-exp
-       (exp1 exp2)
-       (arrayref (expval->array (value-of exp1 env)) (expval->num (value-of exp2 env))))
-      (arrayset-exp
-       (exp1 exp2 exp3)
-       (arrayref (expval->array (value-of exp1 env)) (expval->num (value-of exp2 env)) (value-of exp3 env)))
       (begin-exp
-        (lst)
-        (letrec ([f (lambda (lst)
-                      (if (null? lst)
-                          27
-                          (begin (value-of (car exp) env)
-                                 (f (cdr lst)))))])
-          (f lst))))))
+        (exp1 exp2)
+        (begin (value-of exp1 env)
+               (value-of exp2 env))))))
 
 (define value
   (lambda (e)
@@ -327,11 +328,15 @@
               (apply-exp (var-exp 'f) (const-exp 5))))
 
 (define exp2
-  (let-exp 'arr1
-           (newarray (const-exp 6) (const-exp 2))
-           (begin-exp
-             (list (arrayset-exp (var-exp 'arr1) (const-exp 3) (const-exp 7))
-                   (arrayset-exp (var-exp 'arr1) (const-exp 4) (const-exp 8))
-                   (arrayref-exp (var-exp 'arr1) (const-exp 3))))))
-
+  (let-exp 'a
+           (const-exp 2)
+           (let-exp 'p1
+                    (newpair-exp (const-exp 3) (add-exp (var-exp 'a) (const-exp 2)))
+                    (letrec-exp 'f
+                                'p
+                                (setleft-exp (var-exp 'p) (const-exp 5))
+                                (begin-exp
+                                  (apply-exp (var-exp 'f) (var-exp 'p1))
+                                  (diff-exp (left-exp (var-exp 'p1)) (right-exp (var-exp 'p1))))))))
+  
 (display (value exp2))
