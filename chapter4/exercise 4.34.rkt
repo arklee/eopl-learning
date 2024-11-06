@@ -86,24 +86,22 @@
   (lambda (p val)
     (cases proc p
       (procedure (var body env)
-                 (value-of body (extend-env var (newref val) env)))
+                 (value-of body (extend-env var val env)))
       (else (eopl:error "~s not a procedure" p)))))
+
+(define value-of-operand
+  (lambda (exp env)
+    (cases expression exp
+      (var-exp (v) (apply-env env v))
+      (else (newref (value-of exp env))))))
 
 (define-datatype expval expval?
   (num-val
    (num number?))
   (bool-val
    (bool boolean?))
-  (pair-val
-   (car expval?)
-   (cdr expval?))
-  (emptylist)
   (proc-val
    (proc proc?)))
-
-(define-datatype denval denval?
-  (ref-val
-   (num number?)))
 
 (define report-expval-extractor-error
   (lambda (type val)
@@ -121,29 +119,11 @@
       (bool-val (bool) bool)
       (else (report-expval-extractor-error 'bool val)))))
 
-(define expval->car
-  (lambda (val)
-    (cases expval val
-      (pair-val (car cdr) car)
-      (else (report-expval-extractor-error 'pair val)))))
-
-(define expval->cdr
-  (lambda (val)
-    (cases expval val
-      (pair-val (car cdr) cdr)
-      (else (report-expval-extractor-error 'pair val)))))
-
 (define expval->proc
   (lambda (val)
     (cases expval val
       (proc-val (proc) proc)
       (else (report-expval-extractor-error 'procedure val)))))
-
-(define expval->ref
-  (lambda (val)
-    (cases denval val
-      (ref-val (num) num)
-      (else (report-expval-extractor-error 'reference val))))) 
 
 (define-datatype expression expression?
   (const-exp
@@ -183,16 +163,6 @@
    (var identifier?)
    (exp1 expression?)
    (body expression?))
-  (cons-exp
-   (exp1 expression?)
-   (exp2 expression?))
-  (car-exp
-   (exp1 expression?))
-  (cdr-exp
-   (exp1 expression?))
-  (emptylist-exp)
-  (null?-exp
-   (exp1 expression?))
   (proc-exp
    (var identifier?)
    (body expression?))
@@ -208,8 +178,7 @@
    (var identifier?)
    (val expression?))
   (begin-exp
-    (exp1 expression?)
-    (exp2 expression?)))
+    (exp1 (list-of expression?))))
 
 (define value-of
   (lambda (exp env)
@@ -255,22 +224,6 @@
               (if (expval->bool (value-of exp1 env))
                   (value-of exp2 env)
                   (value-of exp3 env)))
-      (cons-exp (exp1 exp2)
-                (let [(val1 (value-of exp1 env))
-                      (val2 (value-of exp2 env))]
-                  (pair-val val1 val2)))
-      (car-exp (exp1)
-               (let [(pair1 (value-of exp1 env))]
-                 (expval->car pair1)))
-      (cdr-exp (exp1)
-               (let [(pair1 (value-of exp1 env))]
-                 (expval->cdr pair1)))
-      (emptylist-exp () (emptylist))
-      (null?-exp (exp1)
-                 (let [(lst1 (value-of exp1 env))]
-                   (cases expval lst1
-                     (emptylist () (bool-val #t))
-                     (else (bool-val #f)))))
       (proc-exp (var body)
                 (proc-val (procedure var body env)))
       (letrec-exp (var proc-var proc-body body)
@@ -281,16 +234,20 @@
                       (value-of body new-env))))
       (apply-exp (exp1 exp2)
                  (let [(proc1 (expval->proc (value-of exp1 env)))
-                       (val1 (value-of exp2 env))]
+                       (val1 (value-of-operand exp2 env))]
                    (apply-procedure proc1 val1)))
       (assign-exp (var exp)
                     (begin
                       (setref! (apply-env env var)
                              (value-of exp env))
                       (num-val 27)))
-      (begin-exp (exp1 exp2)
-                 (begin (value-of exp1 env)
-                        (value-of exp2 env))))))
+      (begin-exp
+        (lst)
+        (letrec ([f (lambda (lst val)
+                      (if (null? lst)
+                          val
+                          (f (cdr lst) (value-of (car lst) env))))])
+          (f lst 27))))))
 
 (define value
   (lambda (e)
@@ -299,18 +256,6 @@
       (value-of e (empty-env)))))
 
 (define exp1
-  (let-exp 'a
-           (const-exp 1)
-           (let-exp 'f
-                    (proc-exp 'x
-                              (begin-exp
-                                (assign-exp 'a (const-exp 2))
-                                (add-exp (var-exp 'x) (var-exp 'a))))
-                    (begin-exp
-                      (assign-exp 'a (const-exp 3))
-                      (apply-exp (var-exp 'f) (const-exp 5))))))
-
-(define exp2
   (letrec-exp 'f
               'x
               (if-exp (zero?-exp (var-exp 'x))
@@ -318,13 +263,31 @@
                       (mult-exp (var-exp 'x) (apply-exp (var-exp 'f) (diff-exp (var-exp 'x) (const-exp 1)))))
               (apply-exp (var-exp 'f) (const-exp 5))))
 
+(define exp2
+  (let-exp 'a
+           (const-exp 1)
+           (let-exp 'f
+                    (proc-exp 'x
+                              (assign-exp 'x (const-exp 5)))
+                    (begin-exp (list (apply-exp (var-exp 'f) (var-exp 'a))
+                                     (var-exp 'a))))))
+
 (define exp3
-  (let-exp 'f
-           (const-exp 0)
-           (begin-exp
-             (assign-exp 'f
-                         (proc-exp 'x
-                                   (if-exp (zero?-exp (var-exp 'x))
-                                           (const-exp 1)
-                                           (mult-exp (var-exp 'x) (apply-exp (var-exp 'f) (diff-exp (var-exp 'x) (const-exp 1)))))))
-             (apply-exp (var-exp 'f) (const-exp 5)))))
+  (let-exp 'n
+           (const-exp 5)
+           (let-exp 'a
+                    (const-exp 5)
+                    (letrec-exp 'f
+                                'x
+                                (begin-exp
+                                  (list (assign-exp 'x (mult-exp (var-exp 'x) (const-exp 2)))
+                                        (assign-exp 'a (diff-exp (var-exp 'a) (const-exp 1)))
+                                        (if-exp (greater?-exp (var-exp 'a) (const-exp 0))
+                                                (apply-exp (var-exp 'f) (var-exp 'x))
+                                                (const-exp 27))))
+                                (begin-exp
+                                  (list
+                                   (apply-exp (var-exp 'f) (var-exp 'n))
+                                   (var-exp 'n)))))))
+
+(display (value exp3))

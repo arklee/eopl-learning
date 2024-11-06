@@ -114,9 +114,10 @@
         val
         (report-expval-extractor-error 'reference val))))
 
-(define array?
-  (lambda (v)
-    (reference? v)))
+(define-datatype array array?
+  (an-array
+   (firstloc reference?)
+   (len integer?)))
 
 (define newarray
   (lambda (len initval)
@@ -129,19 +130,32 @@
                       (f (- len 1)))))])
       (let ([firstloc (newref initval)])
         (begin (f (- len 1))
-               firstloc)))))
+               (an-array firstloc len))))))
 
 (define arrayref
   (lambda (arr ref)
-    (if (array? arr)
-        (deref (+ arr ref))
-        (eopl:error "~s is not an array" 'arr))))
+    (cases array arr
+      (an-array
+       (first len)
+       (if (< ref len)
+           (deref (+ ref first))
+           (eopl:error "index ~s out of range ~s" ref len)))
+      (else (eopl:error "~s is not an array" 'arr)))))
 
 (define arrayset
   (lambda (arr ref val)
-    (if (array? arr)
-        (setref! (+ arr ref) val)
-        (eopl:error "~s is not an array" 'arr))))
+    (cases array arr
+      (an-array
+       (first len)
+       (if (< ref len)
+           (setref! (+ first ref) val)
+           (eopl:error "index ~s out of range ~s" ref len)))
+      (else (eopl:error "~s is not an array" 'arr)))))
+
+(define arraylength
+  (lambda (arr)
+    (cases array arr
+      (an-array (first len) len))))
 
 (define expval->array
   (lambda (val)
@@ -204,7 +218,7 @@
    (var identifier?)
    (exp expression?))
   (array-exp
-   (len integer?)
+   (len expression?)
    (val expression?))
   (arrayref-exp
    (arr expression?)
@@ -212,7 +226,9 @@
   (arrayset-exp
    (arr expression?)
    (ref expression?)
-   (val expression?)))
+   (val expression?))
+  (arraylength-exp
+   (arr expression?)))
 
 (define value-of
   (lambda (exp env)
@@ -302,17 +318,18 @@
        (arrayref (expval->array (value-of exp1 env)) (expval->num (value-of exp2 env))))
       (arrayset-exp
        (exp1 exp2 exp3)
-       (arrayref (expval->array (value-of exp1 env)) (expval->num (value-of exp2 env)) (value-of exp3 env)))
+       (arrayset (expval->array (value-of exp1 env)) (expval->num (value-of exp2 env)) (value-of exp3 env)))
+      (arraylength-exp
+       (exp1) (arraylength (expval->array (value-of exp1 env))))
       (begin-exp
         (lst)
-        (letrec ([f (lambda (lst)
+        (letrec ([f (lambda (lst val)
                       (if (null? lst)
-                          27
-                          (begin (value-of (car exp) env)
-                                 (f (cdr lst)))))])
-          (f lst))))))
+                          val
+                          (f (cdr lst) (value-of (car lst) env))))])
+          (f lst 27))))))
 
-(define value
+(define run
   (lambda (e)
     (begin
       (initialize-store!)
@@ -328,10 +345,8 @@
 
 (define exp2
   (let-exp 'arr1
-           (newarray (const-exp 6) (const-exp 2))
+           (array-exp (const-exp 6) (const-exp 2))
            (begin-exp
              (list (arrayset-exp (var-exp 'arr1) (const-exp 3) (const-exp 7))
                    (arrayset-exp (var-exp 'arr1) (const-exp 4) (const-exp 8))
-                   (arrayref-exp (var-exp 'arr1) (const-exp 3))))))
-
-(display (value exp2))
+                   (arrayref-exp (var-exp 'arr1) (const-exp 4))))))
