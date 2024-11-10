@@ -222,7 +222,7 @@
        (if (expval->bool (value-of exp1 env))
            (value-of exp2 env)
            (value-of exp3 env)))
-      (cons-exp
+    (cons-exp
        (exp1 exp2)
        (let [(val1 (value-of exp1 env))
              (val2 (value-of exp2 env))]
