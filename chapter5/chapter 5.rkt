@@ -51,6 +51,9 @@
    (car expval?)
    (cdr expval?))
   (emptylist)
+  (list-val
+   (car expval?)
+   (cdr expval?))
   (proc-val
    (var identifier?)
    (body expression?)
@@ -71,16 +74,6 @@
     (cases expval val
       (bool-val (bool) bool)
       (else (report-expval-extractor-error 'bool val)))))
-
-(define init-env
-  (lambda ()
-    (extend-env
-     'i (num-val 1)
-     (extend-env
-      'v (num-val 5)
-      (extend-env
-       'x (num-val 10)
-       (empty-env))))))
 
 (define-datatype expression expression?
   (const-exp
@@ -108,6 +101,17 @@
   ;; (less?-exp
   ;;  (exp1 expression?)
   ;;  (exp2 expression?))
+  (list-exp
+   (exps list?))
+  (pair-exp
+   (car expression?)
+   (cdr expression?))
+  (car-exp
+   (exp1 expression?))
+  (cdr-exp
+   (exp1 expression?))
+  (null?-exp
+   (exp1 expression?))
   (zero?-exp
    (exp1 expression?))
   (if-exp
@@ -171,6 +175,19 @@
       ;;  (let [(val1 (value-of exp1 env))
       ;;        (val2 (value-of exp2 env))]
       ;;    (bool-val (< (expval->num val1) (expval->num val2)))))
+      (pair-exp (carexp cdrexp)
+                (value-of/k carexp env (pair-car-cont cdrexp env cont)))
+      (car-exp (exp1)
+               (value-of/k exp1 env (car-cont cont)))
+      (cdr-exp (exp1)
+               (value-of/k exp1 env (cdr-cont cont)))
+      (list-exp
+       (exps)
+       (if (null? exps)
+           (emptylist)
+           (value-of/k (car exps) env (list-cont (cdr exps) '() env cont))))
+      (null?-exp (exp1)
+               (value-of/k exp1 env (null?-cont cont)))
       (zero?-exp (exp)
                  (value-of/k exp env (zero1-cont cont)))
       (var-exp (var) (apply-cont cont (apply-env env var)))
@@ -235,6 +252,57 @@
             [num2 (expval->num val2)])
         (apply-cont cont (num-val (- num1 num2)))))))
 
+(define pair-car-cont
+  (lambda (cdr-exp env cont)
+    (lambda (car-val)
+      (value-of/k cdr-exp env (pair-cdr-cont car-val cont)))))
+
+(define pair-cdr-cont
+  (lambda (car-val cont)
+    (lambda (cdr-val)
+      (apply-cont cont (list-val car-val cdr-val)))))
+
+(define car-cont
+  (lambda (cont)
+    (lambda (val)
+      (cases expval val
+        (list-val (car cdr) (apply-cont cont car))
+        (else (eopl:error "~s not a list" val))))))
+
+(define cdr-cont
+  (lambda (cont)
+    (lambda (val)
+      (cases expval val
+        (list-val (car cdr) (apply-cont cont cdr))
+        (else (eopl:error "~s not a list" val))))))
+
+(define null?-cont
+  (lambda (cont)
+    (lambda (val)
+      (cases expval val
+        (list-val (car cdr) (apply-cont cont (bool-val #t)))
+        (else (apply-cont cont (bool-val #f)))))))
+
+(define list-cont
+  (lambda (rest vals env cont)
+    (lambda (firstval)
+      (let ([allvals (cons firstval vals)])
+        (if (null? rest)
+            (wrap-list allvals cont)
+            (value-of/k (car rest) env (list-cont (cdr rest) allvals env cont)))))))
+
+(define wrap-list
+  (lambda (vals cont)
+    (letrec ([f (lambda (vals lst)
+                  (if (null? vals)
+                      lst
+                      (f (cdr vals) (list-val (car vals) lst))))])
+      (apply-cont cont (f vals (emptylist))))))
+
+(define run
+  (lambda (e)
+    (value-of/k e (empty-env) (end-cont))))
+
 ;; (define exp-fact
 ;;   (letrec-exp 'f
 ;;               'x
@@ -243,16 +311,15 @@
 ;;                       (mult-exp (var-exp 'x) (apply-exp (var-exp 'f) (diff-exp (var-exp 'x) (const-exp 1)))))
 ;;               (apply-exp (var-exp 'f) (const-exp 5))))
 
-(define exp1
-  (if-exp (zero?-exp (const-exp 1))
-          (const-exp 3)
-          (const-exp 4)))
+;; (define exp1
+;;   (if-exp (zero?-exp (const-exp 1))
+;;           (const-exp 3)
+;;           (const-exp 4)))
 
-(define exp2
-  (diff-exp (const-exp 3) (const-exp 2)))
+;; (define exp2
+;;   (diff-exp (const-exp 3) (const-exp 2)))
 
-(define run
-  (lambda (e)
-    (value-of/k e (empty-env) (end-cont))))
+(define exp3
+  (list-exp (list (const-exp 3) (const-exp 4) (const-exp 5) (zero?-exp (const-exp 0)))))
 
-(display (run exp2))
+(display (run exp3))
