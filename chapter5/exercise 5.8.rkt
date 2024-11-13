@@ -10,7 +10,7 @@
    (env environment?))
   (extend-env-letrec
    (var identifier?)
-   (proc-var identifier?)
+   (proc-vars (list-of identifier?))
    (proc-body expression?)
    (env environment?)))
 
@@ -24,9 +24,9 @@
            saved-val
            (apply-env saved-env search-var)))
       (extend-env-letrec
-       (var proc-var proc-body saved-env)
+       (var proc-vars proc-body saved-env)
        (if (eqv? search-var var)
-           (proc-val proc-var proc-body env)
+           (proc-marg-val (proc-vars) proc-body env)
            (apply-env saved-env search-var)))
       (else (report-invalid-env env)))))
 
@@ -47,8 +47,15 @@
    (num number?))
   (bool-val
    (bool boolean?))
-  (proc-val
-   (var identifier?)
+  (pair-val
+   (car expval?)
+   (cdr expval?))
+  (emptylist)
+  (list-val
+   (car expval?)
+   (cdr expval?))
+  (proc-marg-val
+   (vars (list-of identifier?))
    (body expression?)
    (saved-env environment?)))
 
@@ -94,6 +101,17 @@
   ;; (less?-exp
   ;;  (exp1 expression?)
   ;;  (exp2 expression?))
+  (list-exp
+   (exps list?))
+  (pair-exp
+   (car expression?)
+   (cdr expression?))
+  (car-exp
+   (exp1 expression?))
+  (cdr-exp
+   (exp1 expression?))
+  (null?-exp
+   (exp1 expression?))
   (zero?-exp
    (exp1 expression?))
   (if-exp
@@ -106,12 +124,16 @@
    (var identifier?)
    (exp1 expression?)
    (body expression?))
-  (proc-exp
-   (var identifier?)
+  (letmul-exp
+   (vars (list-of identifier?))
+   (exps (list-of expression?))
+   (body expression?))
+  (proc-marg-exp
+   (var (list-of identifier?))
    (body expression?))
   (call-exp
    (rator expression?)
-   (rand expression?))
+   (rand (list-of expression?)))
   (letrec-exp
    (var identifier?)
    (proc-var identifier?)
@@ -157,21 +179,35 @@
       ;;  (let [(val1 (value-of exp1 env))
       ;;        (val2 (value-of exp2 env))]
       ;;    (bool-val (< (expval->num val1) (expval->num val2)))))
+      (pair-exp (carexp cdrexp)
+                (value-of/k carexp env (pair-car-cont cdrexp env cont)))
+      (car-exp (exp1)
+               (value-of/k exp1 env (car-cont cont)))
+      (cdr-exp (exp1)
+               (value-of/k exp1 env (cdr-cont cont)))
+      (list-exp
+       (exps)
+       (value-of/k (car exps) env (list-cont (cdr exps) '() env cont)))
+      (null?-exp (exp1)
+               (value-of/k exp1 env (null?-cont cont)))
       (zero?-exp (exp)
                  (value-of/k exp env (zero1-cont cont)))
       (var-exp (var) (apply-cont cont (apply-env env var)))
       (let-exp
        (var exp1 body)
        (value-of/k exp1 env (let-exp-cont var body env cont)))
+      (letmul-exp
+       (vars exps body)
+       (value-of/k (car exps) env (letmul-cont vars (cdr exps) body env cont)))
       (if-exp
        (exp1 exp2 exp3)
        (value-of/k exp1 env (if-test-cont exp2 exp3 env cont)))
-      (proc-exp
-       (var body)
-       (apply-cont cont (proc-val var body env)))
+      (proc-marg-exp
+       (vars body)
+       (apply-cont cont (proc-marg-val vars body env)))
       (letrec-exp
-       (var proc-var proc-body body)
-       (value-of/k body (extend-env-letrec var proc-var proc-body env) cont))
+       (var proc-vars proc-body body)
+       (value-of/k body (extend-env-letrec var proc-vars proc-body env) cont))
       (call-exp (rator rand)
                 (value-of/k rator env (rator-cont rand env cont))))))
 
@@ -217,16 +253,77 @@
 (define rator-cont
   (lambda (rand env cont)
     (lambda (proc1)
-      (value-of/k rand env (rand-cont proc1 cont)))))
-
-(define rand-cont
-  (lambda (proc1 cont)
-    (lambda (val)
       (cases expval proc1
-        (proc-val
-         (var body saved-env)
-         (value-of/k body (extend-env var val saved-env) cont))
+        (proc-marg-val (vars body saved-env)
+                       (value-of/k (car rand) env (rand-marg-cont vars (cdr rand) body saved-env cont)))
         (else (eopl:error 'call-exp "~s is not a procedure" proc1))))))
+
+(define rand-marg-cont
+  (lambda (vars rest body env cont)
+    (lambda (val)
+      (let ([newenv (extend-env (car vars) val env)])
+        (if (null? rest)
+            (value-of/k body newenv cont)
+            (value-of/k (car rest)
+                        newenv
+                        (letmul-cont (cdr vars) (cdr rest) body newenv cont)))))))
+
+(define pair-car-cont
+  (lambda (cdr-exp env cont)
+    (lambda (car-val)
+      (value-of/k cdr-exp env (pair-cdr-cont car-val cont)))))
+
+(define pair-cdr-cont
+  (lambda (car-val cont)
+    (lambda (cdr-val)
+      (apply-cont cont (list-val car-val cdr-val)))))
+
+(define car-cont
+  (lambda (cont)
+    (lambda (val)
+      (cases expval val
+        (list-val (car cdr) (apply-cont cont car))
+        (else (eopl:error "~s not a list" val))))))
+
+(define cdr-cont
+  (lambda (cont)
+    (lambda (val)
+      (cases expval val
+        (list-val (car cdr) (apply-cont cont cdr))
+        (else (eopl:error "~s not a list" val))))))
+
+(define null?-cont
+  (lambda (cont)
+    (lambda (val)
+      (cases expval val
+        (list-val (car cdr) (apply-cont cont (bool-val #t)))
+        (else (apply-cont cont (bool-val #f)))))))
+
+(define list-cont
+  (lambda (rest vals env cont)
+    (lambda (firstval)
+      (let ([allvals (cons firstval vals)])
+        (if (null? rest)
+            (list-cont-final allvals cont)
+            (value-of/k (car rest) env (list-cont (cdr rest) allvals env cont)))))))
+
+(define list-cont-final
+  (lambda (vals cont)
+    (letrec ([f (lambda (vals lst)
+                  (if (null? vals)
+                      lst
+                      (f (cdr vals) (list-val (car vals) lst))))])
+      (apply-cont cont (f vals (emptylist))))))
+1
+(define letmul-cont
+  (lambda (vars rest body env cont)
+    (lambda (val)
+      (let ([newenv (extend-env (car vars) val env)])
+        (if (null? rest)
+            (value-of/k body newenv cont)
+            (value-of/k (car rest)
+                        newenv
+                        (letmul-cont (cdr vars) (cdr rest) body newenv cont)))))))
 
 (define run
   (lambda (e)
@@ -241,10 +338,21 @@
 ;;               (apply-exp (var-exp 'f) (const-exp 5))))
 (define exp1
   (let-exp 'f
-            (proc-exp 'x (diff-exp (var-exp 'x) (const-exp 1)))
-            (call-exp (var-exp 'f) (const-exp 3))))
+           (proc-marg-exp '(x) (diff-exp (var-exp 'x) (const-exp 1)))
+           (call-exp (var-exp 'f) (list (const-exp 3)))))
 
 ;; (define exp2
 ;;   (diff-exp (const-exp 3) (const-exp 2)))
+
+(define exp3
+  (list-exp (list (const-exp 3) (const-exp 4) (const-exp 5) (zero?-exp (const-exp 0)))))
+
+(define exp4
+  (let-exp 'f
+           (proc-marg-exp '(x y z)
+                          (diff-exp (diff-exp (var-exp 'x) (var-exp 'y)) (var-exp 'z)))
+           (call-exp (var-exp 'f) (list [const-exp 10]
+                                        [const-exp 3]
+                                        [const-exp 2]))))
 
 (display (run exp1))

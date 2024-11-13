@@ -6,12 +6,7 @@
   (empty-env)
   (extend-env
    (var identifier?)
-   (val expval?)
-   (env environment?))
-  (extend-env-letrec
-   (var identifier?)
-   (proc-var identifier?)
-   (proc-body expression?)
+   (loc integer?)
    (env environment?)))
 
 (define apply-env
@@ -23,11 +18,6 @@
        (if (eqv? search-var saved-var)
            saved-val
            (apply-env saved-env search-var)))
-      (extend-env-letrec
-       (var proc-var proc-body saved-env)
-       (if (eqv? search-var var)
-           (proc-val proc-var proc-body env)
-           (apply-env saved-env search-var)))
       (else (report-invalid-env env)))))
 
 (define report-no-binding-found
@@ -38,9 +28,53 @@
   (lambda (env)
     (eopl:error 'apply-env "Bad environment: ~s" env)))
 
-(define-datatype program program?
-  (a-program
-   (exp1 expression?)))
+(define empty-store
+  (lambda () '()))
+
+(define the-store 'uninitialized)
+
+(define get-store
+  (lambda () the-store))
+
+(define initialize-store!
+  (lambda ()
+    (set! the-store (empty-store))))
+
+(define reference?
+  (lambda (v)
+    (integer? v)))
+
+(define newref
+  (lambda (val)
+    (let ((next-ref (length the-store)))
+      (set! the-store (append the-store (list val)))
+      next-ref)))
+
+(define deref
+  (lambda (ref)
+    (list-ref the-store ref)))
+
+(define setref!
+  (lambda (ref val)
+    (set! the-store
+          (letrec
+              ((setref-inner
+                (lambda (store1 ref1)
+                  (cond
+                    ((null? store1)
+                     (report-invalid-reference ref the-store))
+                    ((zero? ref1)
+                     (cons val (cdr store1)))
+                    (else
+                     (cons
+                      (car store1)
+                      (setref-inner
+                       (cdr store1) (- ref1 1))))))))
+            (setref-inner the-store ref)))))
+
+(define report-invalid-reference
+  (lambda (ref the-store)
+    (eopl:error 'setref! "No reference for ~s in ~s" ref the-store)))
 
 (define-datatype expval expval?
   (num-val
@@ -116,7 +150,10 @@
    (var identifier?)
    (proc-var identifier?)
    (proc-body expression?)
-   (body expression?)))
+   (body expression?))
+  (assign-exp
+   (var identifier?)
+   (exp expression?)))
 
 (define value-of/k
   (lambda (exp env cont)
@@ -159,7 +196,7 @@
       ;;    (bool-val (< (expval->num val1) (expval->num val2)))))
       (zero?-exp (exp)
                  (value-of/k exp env (zero1-cont cont)))
-      (var-exp (var) (apply-cont cont (apply-env env var)))
+      (var-exp (var) (apply-cont cont (deref (apply-env env var))))
       (let-exp
        (var exp1 body)
        (value-of/k exp1 env (let-exp-cont var body env cont)))
@@ -169,11 +206,23 @@
       (proc-exp
        (var body)
        (apply-cont cont (proc-val var body env)))
-      (letrec-exp
-       (var proc-var proc-body body)
-       (value-of/k body (extend-env-letrec var proc-var proc-body env) cont))
+      (letrec-exp (var proc-var proc-body body)
+                  (let* ([loc (newref (num-val 27))]
+                         [new-env (extend-env var loc env)])
+                    (begin
+                      (setref! loc (proc-val proc-var proc-body new-env))
+                      (value-of/k body new-env cont))))
+      (assign-exp (var exp)
+                    (begin
+                      (setref! (apply-env env var)
+                             (value-of exp env))
+                      (num-val 27)))
       (call-exp (rator rand)
                 (value-of/k rator env (rator-cont rand env cont))))))
+
+(define set-rhs-cont
+  (lambda (env var cont)
+    ()))
 
 (define apply-cont
   (lambda (cont val)

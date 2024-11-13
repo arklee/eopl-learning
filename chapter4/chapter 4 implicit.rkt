@@ -99,9 +99,7 @@
    (cdr expval?))
   (emptylist)
   (proc-val
-   (proc proc?))
-  (ref-val
-   (num number?)))
+   (proc proc?)))
 
 (define report-expval-extractor-error
   (lambda (type val)
@@ -136,12 +134,6 @@
     (cases expval val
       (proc-val (proc) proc)
       (else (report-expval-extractor-error 'procedure val)))))
-
-(define expval->ref
-  (lambda (val)
-    (cases expval val
-      (ref-val (num) num)
-      (else (report-expval-extractor-error 'reference val))))) 
 
 (define-datatype expression expression?
   (const-exp
