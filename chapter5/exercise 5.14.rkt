@@ -6,7 +6,12 @@
   (empty-env)
   (extend-env
    (var identifier?)
-   (loc integer?)
+   (val expval?)
+   (env environment?))
+  (extend-env-letrec
+   (var identifier?)
+   (proc-var identifier?)
+   (proc-body expression?)
    (env environment?)))
 
 (define apply-env
@@ -18,6 +23,11 @@
        (if (eqv? search-var saved-var)
            saved-val
            (apply-env saved-env search-var)))
+      (extend-env-letrec
+       (var proc-var proc-body saved-env)
+       (if (eqv? search-var var)
+           (proc-val proc-var proc-body env)
+           (apply-env saved-env search-var)))
       (else (report-invalid-env env)))))
 
 (define report-no-binding-found
@@ -28,53 +38,9 @@
   (lambda (env)
     (eopl:error 'apply-env "Bad environment: ~s" env)))
 
-(define empty-store
-  (lambda () '()))
-
-(define the-store 'uninitialized)
-
-(define get-store
-  (lambda () the-store))
-
-(define initialize-store!
-  (lambda ()
-    (set! the-store (empty-store))))
-
-(define reference?
-  (lambda (v)
-    (integer? v)))
-
-(define newref
-  (lambda (val)
-    (let ((next-ref (length the-store)))
-      (set! the-store (append the-store (list val)))
-      next-ref)))
-
-(define deref
-  (lambda (ref)
-    (list-ref the-store ref)))
-
-(define setref!
-  (lambda (ref val)
-    (set! the-store
-          (letrec
-              ((setref-inner
-                (lambda (store1 ref1)
-                  (cond
-                    ((null? store1)
-                     (report-invalid-reference ref the-store))
-                    ((zero? ref1)
-                     (cons val (cdr store1)))
-                    (else
-                     (cons
-                      (car store1)
-                      (setref-inner
-                       (cdr store1) (- ref1 1))))))))
-            (setref-inner the-store ref)))))
-
-(define report-invalid-reference
-  (lambda (ref the-store)
-    (eopl:error 'setref! "No reference for ~s in ~s" ref the-store)))
+(define-datatype program program?
+  (a-program
+   (exp1 expression?)))
 
 (define-datatype expval expval?
   (num-val
@@ -150,12 +116,7 @@
    (var identifier?)
    (proc-var identifier?)
    (proc-body expression?)
-   (body expression?))
-  (begin-exp
-    (lst (list-of expression?)))
-  (assign-exp
-   (var identifier?)
-   (exp expression?)))
+   (body expression?)))
 
 (define value-of/k
   (lambda (exp env cont)
@@ -198,7 +159,7 @@
       ;;    (bool-val (< (expval->num val1) (expval->num val2)))))
       (zero?-exp (exp)
                  (value-of/k exp env (zero1-cont cont)))
-      (var-exp (var) (apply-cont cont (deref (apply-env env var))))
+      (var-exp (var) (apply-cont cont (apply-env env var)))
       (let-exp
        (var exp1 body)
        (value-of/k exp1 env (let-exp-cont var body env cont)))
@@ -208,91 +169,73 @@
       (proc-exp
        (var body)
        (apply-cont cont (proc-val var body env)))
-      (letrec-exp (var proc-var proc-body body)
-                  (let* ([loc (newref (num-val 27))]
-                         [new-env (extend-env var loc env)])
-                    (begin
-                      (setref! loc (proc-val proc-var proc-body new-env))
-                      (value-of/k body new-env cont))))
-      (begin-exp (lst)
-                 (value-of/k (car lst) env (begin-cont (cdr lst) env cont)))
-      (assign-exp (var exp)
-                  (let ([loc (apply-env env var)])
-                    (value-of/k exp env (set-rhs-cont loc cont))))
+      (letrec-exp
+       (var proc-var proc-body body)
+       (value-of/k body (extend-env-letrec var proc-var proc-body env) cont))
       (call-exp (rator rand)
                 (value-of/k rator env (rator-cont rand env cont))))))
 
-(define begin-cont
-  (lambda (rest env cont)
-    (lambda (val)
-      (if (null? rest)
-          (apply-cont cont val)
-          (value-of/k (car rest) env (begin-cont (cdr rest) env cont))))))
-
-(define set-rhs-cont
-  (lambda (loc cont)
-    (lambda (val)
-      (begin
-        (setref! loc val)
-        (apply-cont cont (num-val 27))))))
+(define-datatype continuation continuation?
+  (end-cont)
+  (zero1-cont
+   (cont continuation?))
+  (let-exp-cont
+   (var identifier?)
+   (body expression?)
+   (env environment?)
+   (cont continuation?))
+  (if-test-cont
+   (exp2 expression?)
+   (exp3 expression?)
+   (env environment?)
+   (cont continuation?))
+  (diff1-cont
+   (exp2 expression?)
+   (env environment?)
+   (cont continuation?))
+  (diff2-cont
+   (val expval?)
+   (cont continuation?))
+  (rator-cont
+   (rand expression?)
+   (env environment?)
+   (cont continuation?))
+  (rand-cont
+   (proc1 expval?)
+   (cont continuation?)))
 
 (define apply-cont
   (lambda (cont val)
-    (cont val)))
-
-(define end-cont
-  (lambda ()
-    (lambda (val)
-      (begin (eopl:printf "End of continuation. ~%")
-             val))))
-
-(define zero1-cont
-  (lambda (cont)
-    (lambda (val)
-      (apply-cont cont (bool-val (zero? (expval->num val)))))))
-
-(define let-exp-cont
-  (lambda (var body env cont)
-    (lambda (val)
-      (value-of/k body (extend-env var (newref val) env) cont))))
-
-(define if-test-cont
-  (lambda (exp2 exp3 env cont)
-    (lambda (val)
-      (if (expval->bool val)
-          (value-of/k exp2 env cont)
-          (value-of/k exp3 env cont)))))
-
-(define diff1-cont
-  (lambda (exp2 env cont)
-    (lambda (val1)
-      (value-of/k exp2 env (diff2-cont val1 cont)))))
-
-(define diff2-cont
-  (lambda (val1 cont)
-    (lambda (val2)
-      (let ([num1 (expval->num val1)]
-            [num2 (expval->num val2)])
-        (apply-cont cont (num-val (- num1 num2)))))))
-
-(define rator-cont
-  (lambda (rand env cont)
-    (lambda (proc1)
-      (value-of/k rand env (rand-cont proc1 cont)))))
-
-(define rand-cont
-  (lambda (proc1 cont)
-    (lambda (val)
-      (cases expval proc1
-        (proc-val
-         (var body saved-env)
-         (value-of/k body (extend-env var (newref val) saved-env) cont))
-        (else (eopl:error 'call-exp "~s is not a procedure" proc1))))))
+    (cases continuation cont
+      (end-cont ()
+                (begin (eopl:printf "End of continuation. ~%")
+                       val))
+      (zero1-cont (cont)
+                  (apply-cont cont (bool-val (zero? (expval->num val)))))
+      (let-exp-cont (var body env cont)
+                    (value-of/k body (extend-env var val env) cont))
+      (if-test-cont (exp2 exp3 env cont)
+                          (if (expval->bool val)
+                              (value-of/k exp2 env cont)
+                              (value-of/k exp3 env cont)))
+      (diff1-cont (exp2 env cont)
+                  (value-of/k exp2 env (diff2-cont val cont)))
+      (diff2-cont (val1 cont)
+                  (let ([num1 (expval->num val1)]
+                        [num2 (expval->num val)])
+                    (apply-cont cont (num-val (- num1 num2)))))
+      (rator-cont (rand env cont)
+                  (value-of/k rand env (rand-cont val cont)))
+      (rand-cont (proc1 cont)
+                 (cases expval proc1
+                   (proc-val
+                    (var body saved-env)
+                    (value-of/k body (extend-env var val saved-env) cont))
+                   (else (eopl:error 'call-exp "~s is not a procedure" proc1)))))))
 
 (define run
   (lambda (e)
-    (begin (initialize-store!)
-           (value-of/k e (empty-env) (end-cont)))))
+    (value-of/k e (empty-env) (end-cont))))
 
 ;; (define exp-fact
 ;;   (letrec-exp 'f
@@ -306,11 +249,7 @@
             (proc-exp 'x (diff-exp (var-exp 'x) (const-exp 1)))
             (call-exp (var-exp 'f) (const-exp 3))))
 
-(define exp2
-  (let-exp 'a
-           (const-exp 1)
-           (begin-exp
-             (list (assign-exp 'a (const-exp 4))
-                   (var-exp 'a)))))
+;; (define exp2
+;;   (diff-exp (const-exp 3) (const-exp 2)))
 
-(display (run exp2))
+(display (run exp1))
