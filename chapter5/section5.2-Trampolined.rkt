@@ -171,7 +171,6 @@
        (var proc-var proc-body body)
        (value-of/k body (extend-env-letrec var proc-var proc-body env) cont))
       (call-exp (rator rand)
-
                 (value-of/k rator env (rator-cont rand env cont))))))
 
 (define-datatype continuation continuation?
@@ -233,32 +232,39 @@
       (mult1-cont (exp2 env cont)
                   (value-of/k exp2 env (mult2-cont val cont)))
       (mult2-cont (val1 cont)
-                  (let* ([num1 (expval->num val1)]
-                         [num2 (expval->num val)]
-                         [prod (* num1 num2)])
-                    (apply-cont cont (num-val prod))))
+                  (let ([num1 (expval->num val1)]
+                        [num2 (expval->num val)])
+                    (apply-cont cont (num-val (* num1 num2)))))
       (rator-cont (rand env cont)
                   (value-of/k rand env (rand-cont val cont)))
       (rand-cont (proc1 cont)
-                 (cases expval proc1
-                   (proc-val
-                    (var body saved-env)
-                    (value-of/k body (extend-env var val saved-env) cont))
-                   (else (eopl:error 'call-exp "~s is not a procedure" proc1)))))))
+                 (lambda () (apply-procedure/k proc1 val cont))))))
 
+(define apply-procedure/k
+  (lambda (proc1 val cont)
+    (cases expval proc1
+      (proc-val
+       (var body saved-env)
+       (value-of/k body (extend-env var val saved-env) cont))
+      (else (eopl:error 'call-exp "~s is not a procedure" proc1)))))
+
+(define trampoline
+  (lambda (bounce)
+    (if (expval? bounce)
+        bounce
+        (trampoline (bounce)))))
+      
 (define run
   (lambda (e)
-    (value-of/k e (empty-env) (end-cont))))
+    (trampoline (value-of/k e (empty-env) (end-cont)))))
 
 (define exp-fact
   (letrec-exp 'f
               'x
               (if-exp (zero?-exp (var-exp 'x))
                       (const-exp 1)
-                      (mult-exp (var-exp 'x)
-                                (call-exp (var-exp 'f)
-                                          (diff-exp (var-exp 'x) (const-exp 1)))))
-              (call-exp (var-exp 'f) (const-exp 5))))
+                      (mult-exp (var-exp 'x) (call-exp (var-exp 'f) (diff-exp (var-exp 'x) (const-exp 1)))))
+              (call-exp (var-exp 'f) (const-exp 8))))
 
 (define exp-fact-iter
   (letrec-exp 'f
@@ -269,10 +275,19 @@
                                 (call-exp (call-exp (var-exp 'f)
                                                     (diff-exp (var-exp 'x) (const-exp 1)))
                                           (mult-exp (var-exp 'n) (var-exp 'x)))))
-              (call-exp (call-exp (var-exp 'f) (const-exp 5))
+              (call-exp (call-exp (var-exp 'f) (const-exp 8))
                         (const-exp 1))))
 
-;; (define exp2
-;;   (diff-exp (const-exp 3) (const-exp 2)))
+(define exp1
+  (let-exp 'f
+            (proc-exp 'x (diff-exp (var-exp 'x) (const-exp 1)))
+            (call-exp (var-exp 'f) (const-exp 3))))
 
-(display (run exp-fact))
+(define exp2
+  (diff-exp (const-exp 3) (const-exp 2)))
+
+(define exp3
+  (call-exp (proc-exp 'x (mult-exp (var-exp 'x) (const-exp 2)))
+            (const-exp 4)))
+
+(display (run exp3))

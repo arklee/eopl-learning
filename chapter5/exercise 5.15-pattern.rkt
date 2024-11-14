@@ -1,4 +1,5 @@
 #lang eopl
+(require racket/match)
 
 (define identifier? symbol?)
 
@@ -124,10 +125,10 @@
       (const-exp (num) (apply-cont cont (num-val num)))
       (diff-exp
        (exp1 exp2)
-       (value-of/k exp1 env (diff1-cont exp2 env cont)))
+       (value-of/k exp1 env (cons (list 'diff1-frame exp2 env) cont)))
       (mult-exp
        (exp1 exp2)
-       (value-of/k exp1 env (mult1-cont exp2 env cont)))
+       (value-of/k exp1 env (cons (list 'mult1-frame exp2 env) cont)))
       ;; (minus-exp (exp1)
       ;;            (num-val (- (expval->num (value-of exp1 env)))))
       ;; (add-exp
@@ -156,14 +157,14 @@
       ;;        (val2 (value-of exp2 env))]
       ;;    (bool-val (< (expval->num val1) (expval->num val2)))))
       (zero?-exp (exp)
-                 (value-of/k exp env (zero1-cont cont)))
+                 (value-of/k exp env (cons (list 'zero1-frame) cont)))
       (var-exp (var) (apply-cont cont (apply-env env var)))
       (let-exp
        (var exp1 body)
-       (value-of/k exp1 env (let-exp-cont var body env cont)))
+       (value-of/k exp1 env (cons (list 'let-exp-frame var body env) cont)))
       (if-exp
        (exp1 exp2 exp3)
-       (value-of/k exp1 env (if-test-cont exp2 exp3 env cont)))
+       (value-of/k exp1 env (cons (list 'if-test-frame exp2 exp3 env) cont)))
       (proc-exp
        (var body)
        (apply-cont cont (proc-val var body env)))
@@ -171,108 +172,57 @@
        (var proc-var proc-body body)
        (value-of/k body (extend-env-letrec var proc-var proc-body env) cont))
       (call-exp (rator rand)
-                (value-of/k rator env (rator-cont rand env cont))))))
+                (value-of/k rator env (cons (list 'rator-frame rand env) cont))))))
 
-(define-datatype continuation continuation?
-  (end-cont)
-  (zero1-cont
-   (cont continuation?))
-  (let-exp-cont
-   (var identifier?)
-   (body expression?)
-   (env environment?)
-   (cont continuation?))
-  (if-test-cont
-   (exp2 expression?)
-   (exp3 expression?)
-   (env environment?)
-   (cont continuation?))
-  (diff1-cont
-   (exp2 expression?)
-   (env environment?)
-   (cont continuation?))
-  (diff2-cont
-   (val expval?)
-   (cont continuation?))
-  (mult1-cont
-   (exp2 expression?)
-   (env environment?)
-   (cont continuation?))
-  (mult2-cont
-   (val expval?)
-   (cont continuation?))
-  (rator-cont
-   (rand expression?)
-   (env environment?)
-   (cont continuation?))
-  (rand-cont
-   (proc1 expval?)
-   (cont continuation?)))
+(define end-cont
+  (lambda ()
+    '()))
 
 (define apply-cont
   (lambda (cont val)
-    (cases continuation cont
-      (end-cont ()
-                (eopl:printf "current: end-cont, cont-size: ~s\n" (cont-size cont))
-                (begin (eopl:printf "End of continuation. ~%")
-                       val))
-      (zero1-cont (cont)
-                  (eopl:printf "current: zero1-cont, cont-size: ~s\n" (cont-size cont))
-                  (apply-cont cont (bool-val (zero? (expval->num val)))))
-      (let-exp-cont (var body env cont)
-                    (eopl:printf "current: let-exp-cont, cont-size: ~s\n" (cont-size cont))
-                    (value-of/k body (extend-env var val env) cont))
-      (if-test-cont (exp2 exp3 env cont)
-                    (eopl:printf "current: if-test-cont, cont-size: ~s\n" (cont-size cont))
-                          (if (expval->bool val)
-                              (value-of/k exp2 env cont)
-                              (value-of/k exp3 env cont)))
-      (diff1-cont (exp2 env cont)
-                  (eopl:printf "current: diff1-cont, cont-size: ~s\n" (cont-size cont))
-                  (value-of/k exp2 env (diff2-cont val cont)))
-      (diff2-cont (val1 cont)
-                  (eopl:printf "current: diff2-cont, cont-size: ~s\n" (cont-size cont))
-                  (let ([num1 (expval->num val1)]
-                        [num2 (expval->num val)])
-                    (apply-cont cont (num-val (- num1 num2)))))
-      (mult1-cont (exp2 env cont)
-                  (eopl:printf "current: diff1-cont, cont-size: ~s\n" (cont-size cont))
-                  (value-of/k exp2 env (mult2-cont val cont)))
-      (mult2-cont (val1 cont)
-                  (eopl:printf "current: diff2-cont, cont-size: ~s\n" (cont-size cont))
-                  (let ([num1 (expval->num val1)]
-                        [num2 (expval->num val)])
-                    (apply-cont cont (num-val (* num1 num2)))))
-      (rator-cont (rand env cont)
-                  (eopl:printf "current: rator-cont, cont-size: ~s\n" (cont-size cont))
-                  (value-of/k rand env (rand-cont val cont)))
-      (rand-cont (proc1 cont)
-                 (eopl:printf "current: rand-cont, cont-size: ~s\n" (cont-size cont))
-                 (cases expval proc1
-                   (proc-val
-                    (var body saved-env)
-                    (value-of/k body (extend-env var val saved-env) cont))
-                   (else (eopl:error 'call-exp "~s is not a procedure" proc1)))))))
-
-(define get-sub-cont
-  (lambda (cont)
-    (cases continuation cont
-      (end-cont () (num-val 29))
-      (zero1-cont (cont) cont)
-      (let-exp-cont (var body env cont) cont)
-      (if-test-cont (exp2 exp3 env cont) cont)
-      (diff1-cont (exp2 env cont) cont)
-      (diff2-cont (val1 cont) cont)
-      (mult1-cont (exp2 env cont) cont)
-      (mult2-cont (val1 cont) cont)
-      (rator-cont (rand env cont) cont)
-      (rand-cont (proc1 cont) cont))))
-
-(define cont-size
-  (lambda (cont)
-    (cases continuation cont
-      (end-cont () 1)
-      (else (+ 1 (cont-size (get-sub-cont cont)))))))
+    (if (null? cont)
+        (begin (eopl:printf "End of continuation. ~%")
+               val)
+        (let ([frame (car cont)]
+              [saved-cont (cdr cont)])
+          (match frame
+            [(list type)
+             #:when (eqv? type 'zero1-frame)
+             (apply-cont saved-cont (bool-val (zero? (expval->num val))))]
+            [(list type var body env)
+             #:when (eqv? type 'let-exp-frame)
+             (value-of/k body (extend-env var val env) saved-cont)]
+            [(list type exp2 exp3 env)
+             #:when (eqv? type 'if-test-frame)
+             (if (expval->bool val)
+                 (value-of/k exp2 env saved-cont)
+                 (value-of/k exp3 env saved-cont))]
+            [(list type exp2 env)
+             #:when (eqv? type 'diff1-frame)
+             (value-of/k exp2 env (cons (list 'diff2-frame val) saved-cont))]
+            [(list type val1)
+             #:when (eqv? type 'diff2-frame)
+             (let ([num1 (expval->num val1)]
+                   [num2 (expval->num val)])
+               (apply-cont saved-cont (num-val (- num1 num2))))]
+            [(list type exp2 env)
+             #:when (eqv? type 'mult1-frame)
+             (value-of/k exp2 env (cons (list 'mult2-frame val) saved-cont))]
+            [(list type val1)
+             #:when (eqv? type 'mult2-frame)
+             (let ([num1 (expval->num val1)]
+                   [num2 (expval->num val)])
+               (apply-cont saved-cont (num-val (* num1 num2))))]
+            [(list type rand env)
+             #:when (eqv? type 'rator-frame)
+             (value-of/k rand env (cons (list 'rand-frame val) saved-cont))]
+            [(list type proc1)
+             #:when (eqv? type 'rand-frame)
+             (cases expval proc1
+               (proc-val
+                (var body saved-env)
+                (value-of/k body (extend-env var val saved-env) saved-cont))
+               (else (eopl:error 'call-exp "~s is not a procedure" proc1)))])))))
       
 (define run
   (lambda (e)
@@ -295,7 +245,7 @@
                                 (call-exp (call-exp (var-exp 'f)
                                                     (diff-exp (var-exp 'x) (const-exp 1)))
                                           (mult-exp (var-exp 'n) (var-exp 'x)))))
-              (call-exp (call-exp (var-exp 'f) (const-exp 8))
+              (call-exp (call-exp (var-exp 'f) (const-exp 5))
                         (const-exp 1))))
 
 (define exp1
