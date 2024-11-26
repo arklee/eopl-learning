@@ -2,6 +2,12 @@
 
 (define identifier? symbol?)
 
+(define exp 'uninitialized)
+(define val 'uninitialized)
+(define cont 'uninitialized)
+(define env 'uninitialized)
+(define proc 'uninitialized)
+
 (define-datatype environment environment?
   (empty-env)
   (extend-env
@@ -77,23 +83,6 @@
   (mult-exp
    (exp1 expression?)
    (exp2 expression?))
-  ;; (minus-exp
-  ;;  (exp1 expression?))
-  ;; (add-exp
-  ;;  (exp1 expression?)
-  ;;  (exp2 expression?))
-  ;; (quot-exp
-  ;;  (exp1 expression?)
-  ;;  (exp2 expression?))
-  ;; (equal?-exp
-  ;;  (exp1 expression?)
-  ;;  (exp2 expression?))
-  ;; (greater?-exp
-  ;;  (exp1 expression?)
-  ;;  (exp2 expression?))
-  ;; (less?-exp
-  ;;  (exp1 expression?)
-  ;;  (exp2 expression?))
   (zero?-exp
    (exp1 expression?))
   (if-exp
@@ -119,59 +108,54 @@
    (body expression?)))
 
 (define value-of/k
-  (lambda (exp env cont)
+  (lambda ()
     (cases expression exp
-      (const-exp (num) (apply-cont cont (num-val num)))
+      (const-exp (num)
+                 (set! val (num-val num))
+                 (apply-cont))
       (diff-exp
        (exp1 exp2)
-       (value-of/k exp1 env (diff1-cont exp2 env cont)))
+       (set! exp exp1)
+       (set! cont (diff1-cont exp2 cont))
+       (value-of/k))
       (mult-exp
        (exp1 exp2)
-       (value-of/k exp1 env (mult1-cont exp2 env cont)))
-      ;; (minus-exp (exp1)
-      ;;            (num-val (- (expval->num (value-of exp1 env)))))
-      ;; (add-exp
-      ;;  (exp1 exp2)
-      ;;  (let [(val1 (value-of exp1 env))
-      ;;        (val2 (value-of exp2 env))]
-      ;;    (num-val (+ (expval->num val1) (expval->num val2)))))
-      ;; (quot-exp
-      ;;  (exp1 exp2)
-      ;;  (let [(val1 (value-of exp1 env))
-      ;;        (val2 (value-of exp2 env))]
-      ;;    (num-val (quotient (expval->num val1) (expval->num val2)))))
-      ;; (equal?-exp
-      ;;  (exp1 exp2)
-      ;;  (let [(val1 (value-of exp1 env))
-      ;;        (val2 (value-of exp2 env))]
-      ;;    (bool-val (= (expval->num val1) (expval->num val2)))))
-      ;; (greater?-exp
-      ;;  (exp1 exp2)
-      ;;  (let [(val1 (value-of exp1 env))
-      ;;        (val2 (value-of exp2 env))]
-      ;;    (bool-val (> (expval->num val1) (expval->num val2)))))
-      ;; (less?-exp
-      ;;  (exp1 exp2)
-      ;;  (let [(val1 (value-of exp1 env))
-      ;;        (val2 (value-of exp2 env))]
-      ;;    (bool-val (< (expval->num val1) (expval->num val2)))))
-      (zero?-exp (exp)
-                 (value-of/k exp env (zero1-cont cont)))
-      (var-exp (var) (apply-cont cont (apply-env env var)))
+       (set! exp exp1)
+       (set! cont (mult1-cont exp2 cont))
+       (value-of/k))
+      (zero?-exp
+       (exp1)
+       (set! exp exp1)
+       (set! cont (zero1-cont cont))
+       (value-of/k))
+      (var-exp
+       (var)
+       (set! val (apply-env env var))
+       (apply-cont))
       (let-exp
        (var exp1 body)
-       (value-of/k exp1 env (let-exp-cont var body env cont)))
+       (set! exp exp1)
+       (set! cont (let-exp-cont var body cont))
+       (value-of/k))
       (if-exp
        (exp1 exp2 exp3)
-       (value-of/k exp1 env (if-test-cont exp2 exp3 env cont)))
+       (set! exp exp1)
+       (set! cont (if-test-cont exp2 exp3 cont))
+       (value-of/k))
       (proc-exp
        (var body)
-       (apply-cont cont (proc-val var body env)))
+       (set! val (proc-val var body env))
+       (apply-cont))
       (letrec-exp
        (var proc-var proc-body body)
-       (value-of/k body (extend-env-letrec var proc-var proc-body env) cont))
-      (call-exp (rator rand)
-                (value-of/k rator env (rator-cont rand env cont))))))
+       (set! exp body)
+       (set! env (extend-env-letrec var proc-var proc-body env))
+       (value-of/k))
+      (call-exp
+       (rator rand)
+       (set! exp rator)
+       (set! cont (rator-cont rand cont))
+       (value-of/k)))))
 
 (define-datatype continuation continuation?
   (end-cont)
@@ -180,83 +164,96 @@
   (let-exp-cont
    (var identifier?)
    (body expression?)
-   (env environment?)
    (cont continuation?))
   (if-test-cont
    (exp2 expression?)
    (exp3 expression?)
-   (env environment?)
    (cont continuation?))
   (diff1-cont
    (exp2 expression?)
-   (env environment?)
    (cont continuation?))
   (diff2-cont
    (val expval?)
    (cont continuation?))
   (mult1-cont
    (exp2 expression?)
-   (env environment?)
    (cont continuation?))
   (mult2-cont
    (val expval?)
    (cont continuation?))
   (rator-cont
    (rand expression?)
-   (env environment?)
    (cont continuation?))
   (rand-cont
    (proc1 expval?)
    (cont continuation?)))
 
 (define apply-cont
-  (lambda (cont val)
+  (lambda ()
     (cases continuation cont
       (end-cont ()
                 (begin (eopl:printf "End of continuation. ~%")
                        val))
-      (zero1-cont (cont)
-                  (apply-cont cont (bool-val (zero? (expval->num val)))))
-      (let-exp-cont (var body env cont)
-                    (value-of/k body (extend-env var val env) cont))
-      (if-test-cont (exp2 exp3 env cont)
+      (zero1-cont (saved-cont)
+                  (set! cont saved-cont)
+                  (set! val (bool-val (zero? (expval->num val))))
+                  (apply-cont))
+      (let-exp-cont (var body saved-cont)
+                    (set! exp body)
+                    (set! env (extend-env var val env))
+                    (set! cont saved-cont)
+                    (value-of/k))
+      (if-test-cont (exp2 exp3 saved-cont)
                     (if (expval->bool val)
-                        (value-of/k exp2 env cont)
-                        (value-of/k exp3 env cont)))
-      (diff1-cont (exp2 env cont)
-                  (value-of/k exp2 env (diff2-cont val cont)))
-      (diff2-cont (val1 cont)
+                        (set! exp exp2)
+                        (set! exp exp3))
+                    (set! cont saved-cont)
+                    (value-of/k))
+      (diff1-cont (exp2 saved-cont)
+                  (set! exp exp2)
+                  (set! cont (diff2-cont val saved-cont))
+                  (value-of/k))
+      (diff2-cont (val1 saved-cont)
                   (let ([num1 (expval->num val1)]
                         [num2 (expval->num val)])
-                    (apply-cont cont (num-val (- num1 num2)))))
-      (mult1-cont (exp2 env cont)
-                  (value-of/k exp2 env (mult2-cont val cont)))
-      (mult2-cont (val1 cont)
+                    (set! val (num-val (- num1 num2)))
+                    (set! cont saved-cont)
+                    (apply-cont)))
+      (mult1-cont (exp2 saved-cont)
+                  (set! exp exp2)
+                  (set! cont (mult2-cont val cont))
+                  (value-of/k))
+      (mult2-cont (val1 saved-cont)
                   (let ([num1 (expval->num val1)]
                         [num2 (expval->num val)])
-                    (apply-cont cont (num-val (* num1 num2)))))
-      (rator-cont (rand env cont)
-                  (value-of/k rand env (rand-cont val cont)))
-      (rand-cont (proc1 cont)
-                 (lambda () (apply-procedure/k proc1 val cont))))))
+                    (set! val (num-val (* num1 num2)))
+                    (set! cont saved-cont)
+                    (apply-cont)))
+      (rator-cont (rand saved-cont)
+                  (set! exp rand)
+                  (set! cont (rand-cont val saved-cont))
+                  (value-of/k))
+      (rand-cont (proc1 saved-cont)
+                 (set! proc proc1)
+                 (set! cont saved-cont)
+                 (apply-procedure/k)))))
 
 (define apply-procedure/k
-  (lambda (proc1 val cont)
-    (cases expval proc1
+  (lambda ()
+    (cases expval proc
       (proc-val
        (var body saved-env)
-       (value-of/k body (extend-env var val saved-env) cont))
-      (else (eopl:error 'call-exp "~s is not a procedure" proc1)))))
-
-(define trampoline
-  (lambda (bounce)
-    (if (expval? bounce)
-        bounce
-        (trampoline (bounce)))))
-
+       (set! exp body)
+       (set! env (extend-env var val saved-env))
+       (value-of/k))
+      (else (eopl:error 'call-exp "~s is not a procedure" exp)))))
+      
 (define run
   (lambda (e)
-    (trampoline (value-of/k e (empty-env) (end-cont)))))
+    (set! env (empty-env))
+    (set! cont (end-cont))
+    (set! exp e)
+    (value-of/k)))
 
 (define exp-fact
   (letrec-exp 'f
@@ -264,7 +261,7 @@
               (if-exp (zero?-exp (var-exp 'x))
                       (const-exp 1)
                       (mult-exp (var-exp 'x) (call-exp (var-exp 'f) (diff-exp (var-exp 'x) (const-exp 1)))))
-              (call-exp (var-exp 'f) (const-exp 8))))
+              (call-exp (var-exp 'f) (const-exp 5))))
 
 (define exp-fact-iter
   (letrec-exp 'f
@@ -275,19 +272,15 @@
                                 (call-exp (call-exp (var-exp 'f)
                                                     (diff-exp (var-exp 'x) (const-exp 1)))
                                           (mult-exp (var-exp 'n) (var-exp 'x)))))
-              (call-exp (call-exp (var-exp 'f) (const-exp 8))
+              (call-exp (call-exp (var-exp 'f) (const-exp 5))
                         (const-exp 1))))
 
 (define exp1
   (let-exp 'f
-           (proc-exp 'x (diff-exp (var-exp 'x) (const-exp 1)))
-           (call-exp (var-exp 'f) (const-exp 3))))
+            (proc-exp 'x (diff-exp (var-exp 'x) (const-exp 1)))
+            (call-exp (var-exp 'f) (const-exp 3))))
 
 (define exp2
   (diff-exp (const-exp 3) (const-exp 2)))
 
-(define exp3
-  (call-exp (proc-exp 'x (mult-exp (var-exp 'x) (const-exp 2)))
-            (const-exp 4)))
-
-(display (run exp3))
+(display (run exp-fact))
