@@ -110,18 +110,19 @@
 (define value-of/k
   (lambda ()
     (cases expression exp
-      (const-exp (num)
-                 (set! val (num-val num))
-                 (apply-cont))
+      (const-exp
+       (num)
+       (set! val (num-val num))
+       (apply-cont))
       (diff-exp
        (exp1 exp2)
+       (set! cont (diff1-cont exp2 env cont))
        (set! exp exp1)
-       (set! cont (diff1-cont exp2 cont))
        (value-of/k))
       (mult-exp
        (exp1 exp2)
+       (set! cont (mult1-cont exp2 env cont))
        (set! exp exp1)
-       (set! cont (mult1-cont exp2 cont))
        (value-of/k))
       (zero?-exp
        (exp1)
@@ -134,13 +135,13 @@
        (apply-cont))
       (let-exp
        (var exp1 body)
+       (set! cont (let-exp-cont var body env cont))
        (set! exp exp1)
-       (set! cont (let-exp-cont var body cont))
        (value-of/k))
       (if-exp
        (exp1 exp2 exp3)
+       (set! cont (if-test-cont exp2 exp3 env cont))
        (set! exp exp1)
-       (set! cont (if-test-cont exp2 exp3 cont))
        (value-of/k))
       (proc-exp
        (var body)
@@ -154,7 +155,7 @@
       (call-exp
        (rator rand)
        (set! exp rator)
-       (set! cont (rator-cont rand cont))
+       (set! cont (rator-cont rand env cont))3
        (value-of/k)))))
 
 (define-datatype continuation continuation?
@@ -164,25 +165,30 @@
   (let-exp-cont
    (var identifier?)
    (body expression?)
+   (env environment?)
    (cont continuation?))
   (if-test-cont
    (exp2 expression?)
    (exp3 expression?)
+   (env environment?)
    (cont continuation?))
   (diff1-cont
    (exp2 expression?)
+   (env environment?)
    (cont continuation?))
   (diff2-cont
    (val expval?)
    (cont continuation?))
   (mult1-cont
    (exp2 expression?)
+   (env environment?)
    (cont continuation?))
   (mult2-cont
    (val expval?)
    (cont continuation?))
   (rator-cont
    (rand expression?)
+   (env environment?)
    (cont continuation?))
   (rand-cont
    (proc1 expval?)
@@ -198,44 +204,49 @@
                   (set! cont saved-cont)
                   (set! val (bool-val (zero? (expval->num val))))
                   (apply-cont))
-      (let-exp-cont (var body saved-cont)
-                    (set! exp body)
-                    (set! env (extend-env var val env))
+      (let-exp-cont (var body saved-env saved-cont)
                     (set! cont saved-cont)
+                    (set! exp body)
+                    (set! env (extend-env var val saved-env))
                     (value-of/k))
-      (if-test-cont (exp2 exp3 saved-cont)
+      (if-test-cont (exp2 exp3 saved-env saved-cont)
+                    (set! cont saved-cont)
                     (if (expval->bool val)
                         (set! exp exp2)
                         (set! exp exp3))
-                    (set! cont saved-cont)
+                    (set! env saved-env)
                     (value-of/k))
-      (diff1-cont (exp2 saved-cont)
-                  (set! exp exp2)
+      (diff1-cont (exp2 saved-env saved-cont)
                   (set! cont (diff2-cont val saved-cont))
+                  (set! exp exp2)
+                  (set! env saved-env)
                   (value-of/k))
       (diff2-cont (val1 saved-cont)
                   (let ([num1 (expval->num val1)]
                         [num2 (expval->num val)])
-                    (set! val (num-val (- num1 num2)))
                     (set! cont saved-cont)
+                    (set! val (num-val (- num1 num2)))
                     (apply-cont)))
-      (mult1-cont (exp2 saved-cont)
+      (mult1-cont (exp2 saved-env saved-cont)
+                  (set! cont (mult2-cont val saved-cont))
                   (set! exp exp2)
-                  (set! cont (mult2-cont val cont))
+                  (set! env saved-env)
                   (value-of/k))
       (mult2-cont (val1 saved-cont)
                   (let ([num1 (expval->num val1)]
                         [num2 (expval->num val)])
-                    (set! val (num-val (* num1 num2)))
                     (set! cont saved-cont)
+                    (set! val (num-val (* num1 num2)))
                     (apply-cont)))
-      (rator-cont (rand saved-cont)
-                  (set! exp rand)
+      (rator-cont (rand saved-env saved-cont)
                   (set! cont (rand-cont val saved-cont))
+                  (set! exp rand)
+                  (set! env saved-env)
                   (value-of/k))
       (rand-cont (proc1 saved-cont)
-                 (set! proc proc1)
                  (set! cont saved-cont)
+                 (set! proc proc1)
+                 (set! val val)
                  (apply-procedure/k)))))
 
 (define apply-procedure/k
@@ -277,10 +288,10 @@
 
 (define exp1
   (let-exp 'f
-            (proc-exp 'x (diff-exp (var-exp 'x) (const-exp 1)))
+            (proc-exp 'x (mult-exp (var-exp 'x) (const-exp 2)))
             (call-exp (var-exp 'f) (const-exp 3))))
 
 (define exp2
   (diff-exp (const-exp 3) (const-exp 2)))
 
-(display (run exp-fact))
+(display (run exp-fact-iter))

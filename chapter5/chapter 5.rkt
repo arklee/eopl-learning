@@ -79,9 +79,9 @@
   ;; (add-exp
   ;;  (exp1 expression?)
   ;;  (exp2 expression?))
-  ;; (mult-exp
-  ;;  (exp1 expression?)
-  ;;  (exp2 expression?))
+  (mult-exp
+   (exp1 expression?)
+   (exp2 expression?))
   ;; (quot-exp
   ;;  (exp1 expression?)
   ;;  (exp2 expression?))
@@ -125,6 +125,9 @@
       (diff-exp
        (exp1 exp2)
        (value-of/k exp1 env (diff1-cont exp2 env cont)))
+      (mult-exp
+       (exp1 exp2)
+       (value-of/k exp1 env (mult1-cont exp2 env cont)))
       ;; (minus-exp (exp1)
       ;;            (num-val (- (expval->num (value-of exp1 env)))))
       ;; (add-exp
@@ -132,11 +135,6 @@
       ;;  (let [(val1 (value-of exp1 env))
       ;;        (val2 (value-of exp2 env))]
       ;;    (num-val (+ (expval->num val1) (expval->num val2)))))
-      ;; (mult-exp
-      ;;  (exp1 exp2)
-      ;;  (let [(val1 (value-of exp1 env))
-      ;;        (val2 (value-of exp2 env))]
-      ;;    (num-val (* (expval->num val1) (expval->num val2)))))
       ;; (quot-exp
       ;;  (exp1 exp2)
       ;;  (let [(val1 (value-of exp1 env))
@@ -214,6 +212,18 @@
             [num2 (expval->num val2)])
         (apply-cont cont (num-val (- num1 num2)))))))
 
+(define mult1-cont
+  (lambda (exp2 env cont)
+    (lambda (val1)
+      (value-of/k exp2 env (mult2-cont val1 cont)))))
+
+(define mult2-cont
+  (lambda (val1 cont)
+    (lambda (val2)
+      (let ([num1 (expval->num val1)]
+            [num2 (expval->num val2)])
+        (apply-cont cont (num-val (* num1 num2)))))))
+
 (define rator-cont
   (lambda (rand env cont)
     (lambda (proc1)
@@ -241,7 +251,10 @@
 ;;               (apply-exp (var-exp 'f) (const-exp 5))))
 (define exp1
   (let-exp 'f
-            (proc-exp 'x (diff-exp (var-exp 'x) (const-exp 1)))
+            (proc-exp 'x
+                      (let-exp 'y
+                               (diff-exp (var-exp 'x) (const-exp 1))
+                               (mult-exp (var-exp 'y) (const-exp 2))))
             (call-exp (var-exp 'f) (const-exp 3))))
 
 ;; (define exp2
