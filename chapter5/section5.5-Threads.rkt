@@ -124,6 +124,12 @@
       (proc-val (proc) proc)
       (else (report-expval-extractor-error 'proc val)))))
 
+(define expval->mutex
+  (lambda (val)
+    (cases expval val
+      (mutex-val (mut) mut)
+      (else (report-expval-extractor-error 'mutex val)))))
+
 (define the-lexical-spec
   '((whitespace (whitespace) skip)
     (comment ("%" (arbno (not #\newline))) skip)
@@ -259,6 +265,10 @@
   (print-exp
    (exp expression?))
   (mutex-exp)
+  (wait-exp
+   (exp expression?))
+  (signal-exp
+   (exp expression?))
   (assign-exp
    (var identifier?)
    (exp expression?)))
@@ -321,6 +331,10 @@
                  (value-of/k exp env (print-cont cont)))
       (mutex-exp ()
                  (apply-cont cont (mutex-val (new-mutex))))
+      (wait-exp (mut)
+                (value-of/k mut env (wait-cont cont)))
+      (signal-exp (mut)
+                (value-of/k mut env (signal-cont cont)))
       (call-exp (rator rand)
                 (value-of/k rator env (rator-cont rand env cont))))))
 
@@ -363,6 +377,10 @@
   (spawn-cont
    (cont continuation?))
   (print-cont
+   (cont continuation?))
+  (wait-cont
+   (cont continuation?))
+  (signal-cont
    (cont continuation?))
   (rator-cont
    (rand expression?)
@@ -429,6 +447,14 @@
                        (begin
                          (eopl:pretty-print val)
                          (apply-cont cont (num-val 26))))
+           (wait-cont (saved-cont)
+                      (wait-for-mutex
+                       (expval->mutex val)
+                       (lambda () (apply-cont saved-cont (num-val 52)))))
+           (signal-cont (saved-cont)
+                        (signal-mutex
+                         (expval->mutex val)
+                         (lambda () (apply-cont saved-cont (num-val 53)))))
            (rator-cont (rand env cont)
                        (value-of/k rand env (rand-cont val cont)))
            (rand-cont (val1 cont)
@@ -483,6 +509,36 @@
   (lambda ()
     (set! the-time-remaining (- the-time-remaining 1))))
 
+(define wait-for-mutex
+  (lambda (m th)
+    (cases mutex m
+      (a-mutex (ref-to-closed? ref-to-wait-queue)
+               (cond
+                 ((deref ref-to-closed?)
+                  (setref! ref-to-wait-queue
+                           (enqueue (deref ref-to-wait-queue) th))
+                  (run-next-thread))
+                 (else
+                  (setref! ref-to-closed? #t) (th)))))))
+
+(define signal-mutex
+  (lambda (m th)
+    (cases mutex m
+      (a-mutex (ref-to-closed? ref-to-wait-queue)
+               (let ((closed? (deref ref-to-closed?))
+                     (wait-queue (deref ref-to-wait-queue)))
+                 (if closed?
+                     (if (emtpy-queue? wait-queue)
+                         (setref! ref-to-closed? #f)
+                         (dequeue wait-queue
+                                  (lambda (first-waiting-th other-waiting-ths)
+                                    (place-on-ready-queue!
+                                     first-waiting-th)
+                                    (setref!
+                                     ref-to-wait-queue
+                                     other-waiting-ths))))
+                     (th)))))))
+
 (define empty-queue
   (lambda ()
     '()))
@@ -530,27 +586,30 @@
         in (f 27)")
 
 (define prog3
-  "let a = 10 in
-   let b = *(2, 8) in
-   letrec pa(dummy) =
+  "let n = 10 in
+   let a = 1 in
+   let b = 1 in
+   letrec pa(n) =
             begin
               print (a);
-              set a = -(a, 1);
-              if zero?(a)
-              then dummy
-              else (pa dummy)
+              set n = -(n, 1);
+              set a = *(a, 2);
+              if zero?(n)
+              then 280
+              else (pa n)
             end in
-   letrec pb(dummy) =
+   letrec pb(n) =
             begin
               print (b);
-              set b = -(b, 2);
-              if zero?(b)
-              then dummy
-              else (pb dummy)
+              set n = -(n, 1);
+              set b = *(b, 3);
+              if zero?(n)
+              then 270
+              else (pb n)
             end in
    begin
-     spawn (proc (d) (pa 270));
-     spawn (proc (d) (pb 280))
+     spawn (proc (d) (pa n));
+     spawn (proc (d) (pb n))
    end")
 
-(display (run 18 prog3))
+;(run 28 prog3)
