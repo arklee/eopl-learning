@@ -74,6 +74,82 @@
       (bool-val (bool) bool)
       (else (report-expval-extractor-error 'bool val)))))
 
+(define the-lexical-spec
+    '((whitespace (whitespace) skip)
+      (comment ("%" (arbno (not #\newline))) skip)
+      (identifier
+       (letter (arbno (or letter digit "_" "-" "?")))
+       symbol)
+      (number (digit (arbno digit)) number)
+      (number ("-" digit (arbno digit)) number)
+      ))
+
+(define the-grammar
+  '((program (expression) a-program)
+
+    (expression (number) const-exp)
+    (expression
+     ("-" "(" expression "," expression ")")
+     diff-exp)
+
+    (expression
+     ("*" "(" expression "," expression ")")
+     mult-exp)
+
+    (expression
+     ("zero?" "(" expression ")")
+     zero?-exp)
+
+    (expression
+     ("if" expression "then" expression "else" expression)
+     if-exp)
+
+    (expression (identifier) var-exp)
+
+    (expression
+     ("let" identifier "=" expression "in" expression)
+     let-exp)
+
+    (expression
+     ("proc" "(" identifier ")" expression)
+     proc-exp)
+
+    (expression
+     ("(" expression expression ")")
+     call-exp)
+
+    (expression
+     ("letrec"
+      identifier "(" identifier ")" "=" expression
+      "in" expression)
+     letrec-exp)
+
+    ))
+
+;;;;;;;;;;;;;;;; sllgen boilerplate ;;;;;;;;;;;;;;;;
+
+;; (define show-the-datatypes
+;;   (lambda () (sllgen:list-define-datatypes the-lexical-spec the-grammar)))
+
+(define scan&parse
+  (sllgen:make-string-parser the-lexical-spec the-grammar))
+
+;; (define just-scan
+;;   (sllgen:make-string-scanner the-lexical-spec the-grammar))
+
+(define value-of-program
+    (lambda (pgm)
+      (cases program pgm
+        (a-program (body)
+          (set! cont (end-cont))
+          (set! exp body)
+          (set! env (empty-env))
+          (value-of/k)))))
+
+(define run
+  (lambda (string)
+    (value-of-program (scan&parse string))))
+
 (define-datatype expression expression?
   (const-exp
    (num number?))
@@ -258,40 +334,12 @@
        (set! env (extend-env var val saved-env))
        (value-of/k))
       (else (eopl:error 'call-exp "~s is not a procedure" exp)))))
-      
-(define run
-  (lambda (e)
-    (set! env (empty-env))
-    (set! cont (end-cont))
-    (set! exp e)
-    (value-of/k)))
 
-(define exp-fact
-  (letrec-exp 'f
-              'x
-              (if-exp (zero?-exp (var-exp 'x))
-                      (const-exp 1)
-                      (mult-exp (var-exp 'x) (call-exp (var-exp 'f) (diff-exp (var-exp 'x) (const-exp 1)))))
-              (call-exp (var-exp 'f) (const-exp 5))))
+(define prog1
+  "letrec f(n)
+          = if zero?(n)
+               then 1
+               else *(n, (f -(n, 1)))
+   in (f 5)")
 
-(define exp-fact-iter
-  (letrec-exp 'f
-              'x
-              (proc-exp 'n
-                        (if-exp (zero?-exp (var-exp 'x))
-                                (var-exp 'n)
-                                (call-exp (call-exp (var-exp 'f)
-                                                    (diff-exp (var-exp 'x) (const-exp 1)))
-                                          (mult-exp (var-exp 'n) (var-exp 'x)))))
-              (call-exp (call-exp (var-exp 'f) (const-exp 5))
-                        (const-exp 1))))
-
-(define exp1
-  (let-exp 'f
-            (proc-exp 'x (mult-exp (var-exp 'x) (const-exp 2)))
-            (call-exp (var-exp 'f) (const-exp 3))))
-
-(define exp2
-  (diff-exp (const-exp 3) (const-exp 2)))
-
-(display (run exp-fact-iter))
+(display (run prog1))
