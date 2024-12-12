@@ -1,5 +1,16 @@
 #lang racket
 
+; example:
+
+; (lambda (x) x)
+; -> (lambda (x k) (k x))
+
+; (lambda (x) (x 2))
+; -> (lambda (x k) (x 2 k))
+
+; (lambda (x) (f (g 2)))
+; -> (lambda (x k) (g 2 (lambda (v1) (f v1 k))))
+
 (define (list-ref lst index)
   (cond
     [(null? lst) (error "Index out of bounds")]
@@ -21,65 +32,116 @@
         (set! n (+ n 1))
         (string-append "v" (number->string n)))))
 
-(define cps-transform
-  (lambda (exp rand? k)
+(define final-k
+  (lambda (exp)
     (match exp
-      [`(lambda ,(list* x) ,body) (list 'lambda-exp x body)]
+      [(list-rest rator rand) exp]
+      [`(lambda ,(list* x) ,body) exp]
+      [_ (list 'k exp)])))
+
+(define cps-transform
+  (lambda (exp k)
+    (match exp
+      [`(lambda ,(list* x) ,body)
+      (list 'lambda (append x '(k)) (cps-transform body k))]
       [`(let ((,var ,exp1)) ,body) (list 'let-exp var exp1 body)]
       [`(if ,test ,exp1 ,exp2) (list 'if-exp test exp1 exp2)]
-      [`(zero? ,arg) (list 'zero?-exp arg)]
+      [`(zero? ,arg) 
+       (cps-transform arg
+                      (lambda (v)
+                        (k `(zero? ,v))))]
       [`(,op ,arg1 ,arg2)
        #:when (or (eq? op '+) (eq? op '-) (eq? op '*) (eq? op '/))
-       (cps-transform arg1 #t
+       (cps-transform arg1
                       (lambda (v1)
-                        (cps-transform arg2 #t
+                        (cps-transform arg2
                                        (lambda (v2)
                                          (k `(,op ,v1 ,v2))))))]
       [(list-rest rator rand)
-       (let ((vn (name)))
-         (cps-transform rand #f
-                        (lambda (v)
-                          (append (list rator v)
-                                  `((lambda (,vn)
-                                      ,(k vn)))))))]
+       (cps-transform rator
+                      (lambda (v1)
+                        (letrec ((cps-rand (lambda (exp)
+                                             (match exp
+                                               [`(zero? ,arg) (k `(,v1 ,exp))]
+                                               [`(,op ,arg1 ,arg2)
+                                                #:when (or (eq? op '+) (eq? op '-) (eq? op '*) (eq? op '/))
+                                                (k `(,v1 ,exp))]
+                                               [(list-rest rator rand)
+                                                (let ((vn (name)))
+                                                  `(lambda (,vn) ,(k `(,v1 ,vn))))]
+                                               [x (k `(,v1 ,exp))]
+                                               [_ 'error]))))
+                          (cps-transform (car rand) cps-rand))))]
       [x (k x)]
-      [_ '()])))
+      [_ 'error])))
 
-(display (cps-transform '(f x) #f (lambda (v) v)))
+(define cpser
+  (lambda (e) (cps-transform e final-k)))
+
+(display (cpser '(+ 2 3)))
+
+; current: only "call", "var", "op"
+
+; (cps (f (g x)))
+; call-cont: rator=f saved-k=k
+; val = (g x)
+
+; (cps (g x)) with (call-cont: rator=f saved-k=k)
+; call-cont: rator=g saved-k=(call-cont: rator=f saved-k=k)
+; val = x
+
+; (cps x) with (call-cont: rator=g saved-k=(call-cont: rator=f saved-k=k))
+; (apply (call-cont: rator=g saved-k=(call-cont: rator=f saved-k=k)) x)
+
+; (apply-cont (call-cont: rator=f saved-k=k) (g x))
+
+; final (g x (lambda (v1) (f v1 k)))
+
+
+
+; (cps (f 2))
+; call-cont: rator=f saved-k=k
+; val = 2
+
+; (cps 2) with (call-cont: rator=f saved-k=k)
+; (apply (call-cont: rator=f saved-k=k) 2)
+; (f 2 k)
+
+; final (f 2 k)
 
 (define cps-exps
-  '((lambda (x y cont)
+  '((lambda (x y k)
       (q y (lambda (val)
              (p (+ 8 x) val))))
-    (lambda (x y u v cont)
+    (lambda (x y u v k)
       (g x y (lambda (val)
                (f val (+ u v) (lambda (val)
                                 (+ 1 val))))))
     (g x y (lambda (val1)
              (h v (lambda (val2)
                     (f val1 (+ u val2) (lambda (val3)
-                                         (cont (+ 1 val3))))))))
-    (let ((cont (lambda (val)
+                                         (k (+ 1 val3))))))))
+    (let ((k (lambda (val)
                   (zero? val))))
       (if a
-          (p x cont)
-          (p y cont)))
-    (let ((cont (lambda (val)
+          (p x k)
+          (p y k)))
+    (let ((k (lambda (val)
                   (zero? val))))
       (f a (lambda (val)
              (if val
-                 (p x cont)
-                 (p y cont)))))
+                 (p x k)
+                 (p y k)))))
     (let ((y 8))
       (p y (lambda (val)
              (let ((x val))
                x))))
-    ((let ((cont (lambda (val)
+    ((let ((k (lambda (val)
                    (let ((x val))
                      x))))
        (if a
-           (p x cont)
-           (p y cont))))))
+           (p x k)
+           (p y k))))))
 
 (define test
   (lambda (exp1s exp2s)
