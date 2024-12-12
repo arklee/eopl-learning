@@ -191,6 +191,22 @@
      spawn-exp)
 
     (expression
+     ("mutex" "(" ")")
+     mutex-exp)
+
+    (expression
+     ("wait" "(" expression ")")
+    wait-exp)
+
+    (expression
+     ("yield" "(" ")")
+    yield-exp)
+
+    (expression
+     ("signal" "(" expression ")")
+     signal-exp)
+
+    (expression
      ("letrec"
       identifier "(" identifier ")" "=" expression
       "in" expression)
@@ -259,6 +275,7 @@
    (body expression?))
   (spawn-exp
    (exp expression?))
+  (yield-exp)
   (begin-exp
     (exp1 expression?)
     (exps (list-of expression?)))
@@ -324,6 +341,11 @@
       ;;             (lambda ()
       ;;               (value-of/k exp env (end-subthread-cont cont))))
       ;;            (apply-cont cont (num-val 73)))
+      (yield-exp ()
+                 (begin
+                   (place-on-ready-queue!
+                    (lambda () (apply-cont cont (num-val 99))))
+                   (run-next-thread)))
       (assign-exp (var exp)
                   (let ([loc (apply-env env var)])
                     (value-of/k exp env (set-rhs-cont loc cont))))
@@ -513,31 +535,31 @@
   (lambda (m th)
     (cases mutex m
       (a-mutex (ref-to-closed? ref-to-wait-queue)
-               (cond
-                 ((deref ref-to-closed?)
-                  (setref! ref-to-wait-queue
-                           (enqueue (deref ref-to-wait-queue) th))
-                  (run-next-thread))
-                 (else
-                  (setref! ref-to-closed? #t) (th)))))))
+               (if (deref ref-to-closed?)
+                 (begin
+                   (setref! ref-to-wait-queue
+                            (enqueue (deref ref-to-wait-queue) th))
+                   (run-next-thread))
+                 (begin (setref! ref-to-closed? #t)
+                        (th)))))))
 
 (define signal-mutex
   (lambda (m th)
     (cases mutex m
-      (a-mutex (ref-to-closed? ref-to-wait-queue)
-               (let ((closed? (deref ref-to-closed?))
-                     (wait-queue (deref ref-to-wait-queue)))
-                 (if closed?
-                     (if (emtpy-queue? wait-queue)
-                         (setref! ref-to-closed? #f)
-                         (dequeue wait-queue
-                                  (lambda (first-waiting-th other-waiting-ths)
-                                    (place-on-ready-queue!
-                                     first-waiting-th)
-                                    (setref!
-                                     ref-to-wait-queue
-                                     other-waiting-ths))))
-                     (th)))))))
+           (a-mutex (ref-to-closed? ref-to-wait-queue)
+                    (let ((closed? (deref ref-to-closed?))
+                          (wait-queue (deref ref-to-wait-queue)))
+                      (when closed?
+                          (if (emtpy-queue? wait-queue)
+                              (setref! ref-to-closed? #f)
+                              (dequeue wait-queue
+                                       (lambda (first-waiting-th other-waiting-ths)
+                                         (place-on-ready-queue!
+                                          first-waiting-th)
+                                         (setref!
+                                          ref-to-wait-queue
+                                          other-waiting-ths))))
+                          (th)))))))
 
 (define empty-queue
   (lambda ()
@@ -572,20 +594,6 @@
    in (f 5)")
 
 (define prog2
-  "let x = 5 in
-   let prod = 1 in
-       letrec f(n) =
-              begin
-                set prod = *(prod, x);
-                print(prod);
-                set x = -(x, 1);
-                if zero?(x)
-                then prod
-                else (f 27)
-              end
-        in (f 27)")
-
-(define prog3
   "let n = 10 in
    let a = 1 in
    let b = 1 in
@@ -612,4 +620,47 @@
      spawn (proc (d) (pb n))
    end")
 
-;(run 28 prog3)
+(define prog3
+  "let x = 0
+   in let mut = mutex()
+   in let incr_x = proc (id)
+   proc (dummy)
+     begin
+       wait(mut);
+       set x = -(x,-1);
+       print(x);
+       signal(mut)
+     end
+   in begin
+     spawn((incr_x 100));
+     spawn((incr_x 200));
+     spawn((incr_x 300))
+   end")
+
+(define prog4
+  "let buffer = 0
+   in let producer = proc (n)
+                       letrec wait1(k) =
+                         if zero?(k)
+                         then set buffer = n
+                         else begin
+                                print(-(k,-200));
+                                (wait1 -(k,1))
+                              end
+                       in (wait1 5)
+   in let consumer = proc (d)
+                       letrec busywait (k) =
+                         if zero?(buffer)
+                         then begin
+                                print(-(k,-100));
+                                (busywait -(k,-1))
+                              end
+                         else buffer
+                       in (busywait 0)
+   in begin
+        spawn(proc (d) (producer 44));
+        print(300);
+        (consumer 86)
+      end")
+
+(display (run 200 prog4))

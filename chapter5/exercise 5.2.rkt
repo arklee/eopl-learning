@@ -210,7 +210,7 @@
    (cont continuation?)))
 
 (define apply-cont
-  (lambda (cont val)
+   (lambda (cont val)
     (cases continuation cont
       (end-cont ()
                 (begin (eopl:printf "End of continuation. ~%")
