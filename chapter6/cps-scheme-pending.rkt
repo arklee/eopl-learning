@@ -27,16 +27,16 @@
     (let ((x (if a (p x) (p y)))) x)))
 
 (define name
-    (let ((n 0))
-      (lambda ()
-        (set! n (+ n 1))
-        (string-append "v" (number->string n)))))
+  (let ((n 0))
+    (lambda ()
+      (set! n (+ n 1))
+      (string-append "v" (number->string n)))))
 
 (define final-k
   (lambda (exp)
+    (display "final k\n")
     (match exp
       [(list-rest rator rand) exp]
-      [`(lambda ,(list* x) ,body) exp]
       [_ (list 'k exp)])))
 
 (define cps-transform
@@ -60,54 +60,25 @@
       [(list-rest rator rand)
        (cps-transform rator
                       (lambda (v1)
-                        (letrec ((cps-rand (lambda (exp)
-                                             (match exp
-                                               [`(zero? ,arg) (k `(,v1 ,exp))]
-                                               [`(,op ,arg1 ,arg2)
-                                                #:when (or (eq? op '+) (eq? op '-) (eq? op '*) (eq? op '/))
-                                                (k `(,v1 ,exp))]
-                                               [(list-rest rator rand)
-                                                (let ((vn (name)))
-                                                  `(lambda (,vn) ,(k `(,v1 ,vn))))]
-                                               [x (k `(,v1 ,exp))]
-                                               [_ 'error]))))
-                          (cps-transform (car rand) cps-rand))))]
+                        (let ((cps-rand (lambda (exp)
+                                          (match exp
+                                            [`(zero? ,arg) (k `(,v1 ,exp))]
+                                            [`(,op ,arg1 ,arg2)
+                                             #:when (or (eq? op '+) (eq? op '-) (eq? op '*) (eq? op '/))
+                                             (k `(,v1 ,exp))]
+                                            [(list-rest rator rand)
+                                             (let ((vn (name)))
+                                               (append `(,v1 ,exp) `((lambda (,vn) ,(k `vn)))))]
+                                            [x (k `(,v1 ,exp))]
+                                            [_ 'error]))))
+                          (cps-transform (car rand) (lambda (v2) (cps-rand v2))))))]
       [x (k x)]
       [_ 'error])))
 
 (define cpser
   (lambda (e) (cps-transform e final-k)))
 
-(display (cpser '(+ 2 3)))
-
-; current: only "call", "var", "op"
-
-; (cps (f (g x)))
-; call-cont: rator=f saved-k=k
-; val = (g x)
-
-; (cps (g x)) with (call-cont: rator=f saved-k=k)
-; call-cont: rator=g saved-k=(call-cont: rator=f saved-k=k)
-; val = x
-
-; (cps x) with (call-cont: rator=g saved-k=(call-cont: rator=f saved-k=k))
-; (apply (call-cont: rator=g saved-k=(call-cont: rator=f saved-k=k)) x)
-
-; (apply-cont (call-cont: rator=f saved-k=k) (g x))
-
-; final (g x (lambda (v1) (f v1 k)))
-
-
-
-; (cps (f 2))
-; call-cont: rator=f saved-k=k
-; val = 2
-
-; (cps 2) with (call-cont: rator=f saved-k=k)
-; (apply (call-cont: rator=f saved-k=k) 2)
-; (f 2 k)
-
-; final (f 2 k)
+(display (cpser '(f (g (h x)))))
 
 (define cps-exps
   '((lambda (x y k)
