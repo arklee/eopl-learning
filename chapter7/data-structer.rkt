@@ -25,9 +25,6 @@
    (num number?))
   (bool-val
    (bool boolean?))
-  (pair-val
-   (car expval?)
-   (cdr expval?))
   (proc-val
    (var identifier?)
    (body expression?)
@@ -55,8 +52,6 @@
   (diff-exp
    (exp1 expression?)
    (exp2 expression?))
-  (minus-exp
-   (exp1 expression?))
   (add-exp
    (exp1 expression?)
    (exp2 expression?))
@@ -89,6 +84,7 @@
    (body expression?))
   (proc-exp
    (var identifier?)
+   (var-type type?)
    (body expression?))
   (call-exp
    (proc expression?)
@@ -98,3 +94,22 @@
    (proc-var identifier?)
    (proc-body expression?)
    (body expression?)))
+
+(define-datatype type type?
+  (int-type)
+  (bool-type)
+  (proc-type
+   (arg-type type?)
+   (result-type type?)))
+
+(define-datatype tenvironment tenvironment?
+  (empty-tenv)
+  (extend-tenv
+   (var identifier?)
+   (var-type type?)
+   (env tenvironment?))
+  (extend-tenv-letrec
+   (var identifier?)
+   (proc-var identifier?)
+   (proc-body expression?)
+   (env tenvironment?)))

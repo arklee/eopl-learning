@@ -1,6 +1,7 @@
 #lang eopl
 
 (require "data-structer.rkt")
+(provide (all-defined-out))
 
 (define the-lexical-spec
   '((whitespace (whitespace) skip)
@@ -23,6 +24,10 @@
     (expression
      ("*" "(" expression "," expression ")")
      mult-exp)
+
+    (expression
+     ("/" "(" expression "," expression ")")
+     quot-exp)
 
     (expression
      ("zero?" "(" expression ")")

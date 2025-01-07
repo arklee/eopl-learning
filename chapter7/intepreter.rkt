@@ -1,6 +1,7 @@
 #lang eopl
 
-(require "checked-lang.rkt" "lang.rkt")
+;;(require "lang.rkt")
+(require "data-structer.rkt")
 
 (define apply-env
   (lambda (env search-var)
@@ -26,15 +27,18 @@
   (lambda (env)
     (eopl:error 'apply-env "Bad environment: ~s" env)))
 
-(define value-of-program
-  (lambda (timeslice pgm)
-    (cases program pgm
-      (a-program (exp)
-                 (value-of exp (empty-env))))))
+(define run-exp
+  (lambda (exp)
+    (value-of exp (empty-env))))
 
-(define run
-  (lambda (timeslice string)
-    (value-of-program timeslice (scan&parse string))))
+(define value-of-program
+  (lambda (pgm)
+    (cases program pgm
+      (a-program (exp) (run-exp exp)))))
+
+;; (define run
+;;   (lambda (string)
+;;     (value-of-program (scan&parse string))))
 
 (define value-of
   (lambda (exp env)
@@ -45,8 +49,6 @@
        (let [(val1 (value-of exp1 env))
              (val2 (value-of exp2 env))]
          (num-val (- (expval->num val1) (expval->num val2)))))
-      (minus-exp (exp1)
-                 (num-val (- (expval->num (value-of exp1 env)))))
       (add-exp
        (exp1 exp2)
        (let [(val1 (value-of exp1 env))
@@ -105,14 +107,12 @@
             (value-of body (extend-env var val1 saved-env)))
            (else (eopl:error "not a procedure"))))))))
 
-(define program-fact-rec
-  (value-of
-   (letrec-exp 'f
-               'x
-               (if-exp (zero?-exp (var-exp 'x))
-                       (const-exp 1)
-                       (mult-exp (var-exp 'x) (call-exp (var-exp 'f) (diff-exp (var-exp 'x) (const-exp 1)))))
-               (call-exp (var-exp 'f) (const-exp 5)))
-   (empty-env)))
+(define exp1
+  (letrec-exp 'f
+              'x
+              (if-exp (zero?-exp (var-exp 'x))
+                      (const-exp 1)
+                      (mult-exp (var-exp 'x) (call-exp (var-exp 'f) (diff-exp (var-exp 'x) (const-exp 1)))))
+              (call-exp (var-exp 'f) (const-exp 5))))
 
-(display program-fact-rec)
+(display (run-exp exp1))
